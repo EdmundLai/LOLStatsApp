@@ -2,11 +2,11 @@ var axios = require('axios');
 var RateLimiter = require('limiter').RateLimiter;
 
 // class that all calls to League of Legends APIs are made through
-// TODO: Convert all axios requests to na1.api.riotgames.com to use RateLimiter
+// DONE: Convert all axios requests to na1.api.riotgames.com to use RateLimiter
 class RequestMaker {
     constructor(apiToken) {
-        // limit is one fourth of actual rate limit
-        this.limiter = new RateLimiter(25, 120000);
+        this.limiter1 = new RateLimiter(90, 120000);
+        this.limiter2 = new RateLimiter(18, 1000);
         this.apiToken = apiToken;
         this.gameType = {
             "400": "Draft Pick",
@@ -15,15 +15,33 @@ class RequestMaker {
             "440": "Ranked Flex",
             "450": "ARAM",
             "460": "Twisted Treeline 3v3"
-        }
+        };
+        this.errorLog = {
+            responseCode: undefined,
+            method: ""
+        };
     }
 
-    removeToken() {
+    // removing tokens from first limiter to adhere to 100 requests per 2 minutes
+    removeTokenLimiter1() {
         return new Promise((resolve) => {
-            this.limiter.removeTokens(1, resolve);
+            this.limiter1.removeTokens(1, resolve);
         });
     }
 
+    // removing tokens from second limiter to adhere to 20 requests per second
+    removeTokenLimiter2() {
+        return new Promise((resolve) => {
+            this.limiter2.removeTokens(1, resolve);
+        });
+    }
+
+    // combining removeTokenLimiter calls to make sure each request adheres to both rate limits
+    removeToken() {
+        return Promise.all([this.removeTokenLimiter1(), this.removeTokenLimiter2()]);
+    }
+
+    // getting champion data from latest patch
     getDDragonChampKeys() {
         return axios.get('http://ddragon.leagueoflegends.com/cdn/9.23.1/data/en_US/championFull.json')
         .then(res => {
@@ -37,6 +55,7 @@ class RequestMaker {
         });
     }
 
+    // getting queue type data to convert queueID numbers to real queue types
     getQueueType(queueID) {
         return axios.get('http://static.developer.riotgames.com/docs/lol/queues.json')
         .then(res => {
@@ -57,12 +76,15 @@ class RequestMaker {
     }
 
     getLOLSummonerID(summonerName) {
-        return axios({
-            url: `https://na1.api.riotgames.com/lol/summoner/v4/summoners/by-name/${summonerName}`,
-            method: 'get',
-            headers: {
-                "X-Riot-Token": this.apiToken
-            }
+        return this.removeToken()
+        .then(() => {
+            return axios({
+                url: `https://na1.api.riotgames.com/lol/summoner/v4/summoners/by-name/${summonerName}`,
+                method: 'get',
+                headers: {
+                    "X-Riot-Token": this.apiToken
+                }
+            });
         })
         .then(res => {
             let data = res.data;
@@ -73,18 +95,23 @@ class RequestMaker {
         .catch(err => {
             // console.log(err);
             console.log("error in getLOLSummonerID");
+            this.errorLog.responseCode = err.response.status;
+            this.errorLog.method = "getLOLSummonerID";
             throw err;
         });
     }
 
     getLOLAccountID(summonerName) {
-        return axios({
-            url: `https://na1.api.riotgames.com/lol/summoner/v4/summoners/by-name/${summonerName}`,
-            method: 'get',
-            headers: {
-                "X-Riot-Token": this.apiToken
-            }
-        })
+        return this.removeToken()
+        .then(() => {
+            return axios({
+                url: `https://na1.api.riotgames.com/lol/summoner/v4/summoners/by-name/${summonerName}`,
+                method: 'get',
+                headers: {
+                    "X-Riot-Token": this.apiToken
+                }
+            });
+        })        
         .then(res => {
             let data = res.data;
             let accountID = data["accountId"];
@@ -93,6 +120,9 @@ class RequestMaker {
         .catch(err => {
             // console.log(err);
             console.log("error in getLOLAccountID");
+            this.errorLog.responseCode = err.response.status;
+            this.errorLog.method = "getLOLAccountID";
+
             // console.log(err.response.status);
             throw err;
         });
@@ -130,12 +160,16 @@ class RequestMaker {
                 return null;
             }
         }
-        return axios({
-            url: requestURL,
-            method: 'get',
-            headers: {
-                "X-Riot-Token": this.apiToken
-            }
+
+        return this.removeToken()
+        .then(() => {
+            return axios({
+                url: requestURL,
+                method: 'get',
+                headers: {
+                    "X-Riot-Token": this.apiToken
+                }
+            });
         })
         .then(res => {
             let data = res.data["matches"];
@@ -143,19 +177,28 @@ class RequestMaker {
             return data;
         })
         .catch(err => {
-            console.log(err);
+            console.log("error in getMatchList");
+            this.errorLog.responseCode = err.response.status;
+            this.errorLog.method = "getMatchList";
+            // console.log(err);
+            // if(err.response) {
+            //     console.log(err.response);
+            // }
             throw err;
         });
     }
 
     // tested and works!
     getTimelineData(gameID, participantId) {
-        return axios({
-            url: `https://na1.api.riotgames.com/lol/match/v4/timelines/by-match/${gameID}`,
-            method: 'get',
-            headers: {
-                "X-Riot-Token": this.apiToken
-            }
+        return this.removeToken()
+        .then(() => {
+            return axios({
+                url: `https://na1.api.riotgames.com/lol/match/v4/timelines/by-match/${gameID}`,
+                method: 'get',
+                headers: {
+                    "X-Riot-Token": this.apiToken
+                }
+            });
         })
         .then(res => {
             let data = res.data;
@@ -194,6 +237,9 @@ class RequestMaker {
             return playerTimelineData;
         })
         .catch(err => {
+            console.log("error in getTimelineData");
+            this.errorLog.responseCode = err.response.status;
+            this.errorLog.method = "getTimelineData";
             // console.log(err);
             // console.log(err.response.status);
             throw err;
@@ -201,15 +247,19 @@ class RequestMaker {
     }
 
     getStatsByGame(gameID, championID) {
-        return axios({
-            url: `https://na1.api.riotgames.com/lol/match/v4/matches/${gameID}`,
-            method: 'get',
-            headers: {
-                "X-Riot-Token": this.apiToken
-            }
+        return this.removeToken()
+        .then(() => {
+            return axios({
+                url: `https://na1.api.riotgames.com/lol/match/v4/matches/${gameID}`,
+                method: 'get',
+                headers: {
+                    "X-Riot-Token": this.apiToken
+                }
+            });
         })
         .then(res => {
             let data = res.data;
+            let gameTime = data["gameCreation"];
             let playerDataArr = data["participants"];
             let gameLength = data["gameDuration"];
             let queueId = data["queueId"];
@@ -265,6 +315,7 @@ class RequestMaker {
                 gameID,
                 championID,
                 gameLength,
+                gameTime,
                 gameStats
             };
             return gameInfo;
@@ -273,7 +324,10 @@ class RequestMaker {
         //     console.log(data);
         // })
         .catch(err => {
-            console.log(err);
+            console.log("error in getStatsByGame");
+            this.errorLog.responseCode = err.response.status;
+            this.errorLog.method = "getStatsByGame";
+            // console.log(err);
             // console.log(err.response.status);
             throw err;
         });
@@ -312,66 +366,23 @@ class RequestMaker {
     
                 let gamesRetrieved = gameInfoArr.slice(0, numGamesRetrieved);
     
-                // non rate limited version
-    
-                // return Promise.all(gamesRetrieved.map(gameInfo => {
-                //     // getStatsByGame needs to be rate limited
-                //     return getStatsByGame(gameInfo["gameId"], gameInfo["champion"])
-                //     .catch(err => {
-                //         throw err;
-                //     });
-                // }))
-                // .catch(err => {
-                //     throw err;
-                // });
-    
-                // testing rate limited version (v1)
-                // rate limited version works but is a very inelegant solution
-                // cannot get the entire statsArray at one time
-                // current rate limit is 1 per second: overly conservative
-    
-                // gamesRetrieved.map(gameInfo => {
-                //     limiter.removeTokens(1, (err, requestsRemaining) => {
-                //         getStatsByGame(gameInfo["gameId"], gameInfo["champion"])
-                //         .then(stats => {
-                //             statsArray.push(stats);
-                //         })
-                //         .catch(err => {
-                //             console.log(err);
-                //         });
-                //     });
-                // });
-    
-                // testing rate limited version (v2)
-                // rate limited version works
-                // uses promisifying the rate limiter call as suggested in:
-                // https://stackoverflow.com/questions/52051275/promisify-callbacks-that-use-rate-limiter
-                // current rate limit is 1 per second: overly conservative
-    
                 return Promise.all(gamesRetrieved.map(gameInfo => {
-                    return this.removeToken()
-                    .then(() => {
-                        return this.getStatsByGame(gameInfo["gameId"], gameInfo["champion"])
-                        .then(gameData => {
-                            let stats = gameData.gameStats;
-                            let participantId = stats.participantId;
-                            let gameID = gameData.gameID;
+                    return this.getStatsByGame(gameInfo["gameId"], gameInfo["champion"])
+                    .then(gameData => {
+                        let stats = gameData.gameStats;
+                        let participantId = stats.participantId;
+                        let gameID = gameData.gameID;
 
-                            return this.getTimelineData(gameID, participantId)
-                            .then(timelineData => {
-                                gameData.timelineData = timelineData;
-                                return gameData;
-                            })
-                            .catch(err => {
-                                throw err;
-                            });
+                        return this.getTimelineData(gameID, participantId)
+                        .then(timelineData => {
+                            gameData.timelineData = timelineData;
+                            return gameData;
                         })
                         .catch(err => {
                             throw err;
                         });
                     })
                     .catch(err => {
-                        console.log(err);
                         throw err;
                     });
                 }))
@@ -399,15 +410,10 @@ class RequestMaker {
             });
         })
         .catch(err => {
-            // console.log(err);
-            // console.log(err.response);
             console.log("error message from RequestMaker");
-            // console.log(err.response.status);
-            if(err.response) {
-                return err.response.status;
-            } else {
-                console.log(err);
-            }
+            console.log(`error response code: ${this.errorLog.responseCode}`);
+            // console.log(`error occurred in method: ${this.errorLog.method}`);
+            return this.errorLog;
             
         });
     }
